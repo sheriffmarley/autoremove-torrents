@@ -1,0 +1,7 @@
+task:
+  client: rtorrent
+  host: $(RTORRENT_HOST)
+  username: $(RTORRENT_USERNAME)
+  password: $(RTORRENT_PASSWORD)
+  force_delete:
+    - a_hash

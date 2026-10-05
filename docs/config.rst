@@ -102,6 +102,107 @@ Example:
 
    For more information of the authentication, please visit https://dev.deluge-torrent.org/wiki/UserGuide/Authentication.
 
+For rTorrent
++++++++++++++
+
+This program accesses rTorrent via its XML-RPC interface over HTTP(S) (tested with rTorrent 0.16 and ruTorrent 5.3). rTorrent itself only speaks XML-RPC over SCGI (a TCP port or a unix socket), so one of these is needed:
+
+* A web server mount of the SCGI socket, e.g. ``scgi_pass`` in nginx. ``/RPC2`` is the usual path, but it's only a convention; seedbox providers often use other paths.
+* The ``httprpc`` plugin of ruTorrent, at ``plugins/httprpc/action.php``. It works without any extra mount, but ruTorrent only lets through the commands it considers safe. All the commands used by this program are allowed (tested with ruTorrent 5.3.14).
+
+* The SCGI socket of rTorrent itself, if autoremove-torrents runs on the same machine (see below).
+
+* ``client``: Your client name. Here is rTorrent.
+* ``host``: The full URL of the XML-RPC endpoint, for example, ``https://example.com/RPC2`` or ``https://example.com/rutorrent/plugins/httprpc/action.php``; or the SCGI socket, e.g. ``scgi:///run/rtorrent/scgi.socket`` or ``scgi://127.0.0.1:5000``.
+* ``username``: The username of the HTTP authentication (leave it empty if there is none).
+* ``password``: The password of the HTTP authentication.
+
+.. warning::
+
+   SCGI has no authentication at all: whoever can connect to it can run any command on the machine through rTorrent. Therefore, only these SCGI addresses are accepted:
+
+   * A unix socket: ``scgi:///path/to/scgi.socket`` (``network.scgi.open_local`` in ``.rtorrent.rc``). Its file permissions decide who may connect.
+   * TCP on the loopback interface: ``scgi://127.0.0.1:5000``, ``scgi://[::1]:5000`` or ``scgi://localhost:5000`` (``network.scgi.open_port``). ``localhost`` is only accepted if it resolves to loopback addresses only.
+
+   Any other address is refused. Never expose rTorrent's SCGI port to a network. When using SCGI, ``username`` and ``password`` are only used for ruTorrent (``delete_mode: rutorrent``).
+
+Example:
+
+.. code-block:: yaml
+
+   my_task:
+     client: rtorrent
+     host: https://example.com/RPC2
+     username: admin
+     password: adminadmin
+
+   my_local_task:
+     client: rtorrent
+     host: scgi:///run/rtorrent/scgi.socket
+
+rTorrent doesn't provide every property. These conditions are **not supported**: ``last_activity``, ``downloading_time``, ``max_average_downloadspeed`` and ``min_average_uploadspeed``. Besides,
+
+* ``seeding_time`` is the time since the download was finished (or started, if it was already complete when it was added), because rTorrent doesn't count the seeding time. Time when the torrent was stopped is counted too.
+* ``create_time`` is the time when the torrent was loaded (``d.load_date``, or the time it was started on older versions of rTorrent).
+* Categories are the labels of ruTorrent (``d.custom1``).
+* ``remote_free_space`` uses the free space reported for the open torrents stored in ``path``. If there is no open torrent in ``path``, the condition fails instead of guessing.
+
+Deleting Data in rTorrent
+**************************
+
+rTorrent never deletes data by itself: removing a torrent only removes it from the session. Therefore, ``delete_data: true`` needs some extra settings in ``client_options``:
+
+* ``delete_mode``: How the data is deleted.
+
+  - ``rutorrent``: Let the ``erasedata`` plugin of ruTorrent delete the data, the same as *Remove and → Delete data* in ruTorrent. Requires **ruTorrent 5.3.9 or later**; older versions are refused.
+  - ``local``: autoremove-torrents deletes the data itself. It must be able to access the download directories (e.g. it runs on the same machine, or in a container sharing the volume). Requires Python 3.3+ on Linux/macOS/BSD.
+
+* ``allowed_paths``: **Required.** The directories (as rTorrent sees them) where data may be deleted. A torrent whose base path is not *inside* one of these directories is never removed with its data.
+* ``rutorrent_url``: The URL of ruTorrent, required by the ``rutorrent`` mode, e.g. ``https://example.com/rutorrent``. The same username and password are used.
+* ``path_mapping``: Only for the ``local`` mode. Maps the paths seen by rTorrent to the local paths, e.g. ``/downloads: /mnt/seedbox``. Every path in ``allowed_paths`` must be covered when it's set.
+
+.. code-block:: yaml
+
+   my_task:
+     client: rtorrent
+     host: https://example.com/RPC2
+     username: admin
+     password: adminadmin
+     delete_data: true
+     client_options:
+       delete_mode: rutorrent
+       rutorrent_url: https://example.com/rutorrent
+       allowed_paths:
+         - /downloads
+
+.. code-block:: yaml
+
+   my_task:
+     client: rtorrent
+     host: http://127.0.0.1:8000/RPC2
+     delete_data: true
+     client_options:
+       delete_mode: local
+       allowed_paths:
+         - /downloads
+       path_mapping:
+         /downloads: /mnt/seedbox/downloads
+
+These safety rules apply to both modes. If any of them is violated, the torrent is kept and nothing is deleted:
+
+* Only the files of the torrent are deleted, never other files in its directory. A directory is only removed when it's empty afterwards.
+* The base path must lie inside ``allowed_paths`` (and can't be one of them), and every file must lie inside the base path. Paths containing ``..``, ``//``, line breaks or NUL characters are refused.
+* In the ``local`` mode, every directory is opened without following symlinks. A symlink anywhere between the allowed path and a file makes the whole torrent refused; a file which is a symlink itself is removed as a link, and its target is left untouched.
+* In the ``local`` mode, the torrent is stopped first, its data is deleted next, and it's only removed from rTorrent when all its files are gone. If a file can't be deleted, the torrent stays (stopped) in rTorrent so you can still find the remaining data.
+* The ``.torrent`` file tied to the download (e.g. in a watch directory) is removed together with the torrent, otherwise rTorrent would add it again. ruTorrent does the same.
+
+.. note::
+
+   In the ``rutorrent`` mode, the paths are checked by autoremove-torrents before the request, but the files are collected and deleted by ruTorrent itself, in the background (every 15 seconds by default). The log says *queued for deletion* for this reason. Before deleting, autoremove-torrents loads ruTorrent's plugins (the same as opening the web UI), so that the cleaner of ``erasedata`` is scheduled; if ``erasedata`` is not enabled or can't start, nothing is removed. Please check that:
+
+   1. PHP is available on the machine running rTorrent, because ruTorrent's cleaner is started by rTorrent.
+   2. ``$erasedebug_enabled = true;`` is set in ``plugins/erasedata/conf.php`` if you want to see in ruTorrent's log when a file couldn't be deleted. Otherwise such failures are silent.
+
 Part 3: Strategy Block
 ----------------------
 This part contains strategy blocks. Each strategy block can be divided into 3 parts, too.
@@ -402,7 +503,7 @@ Beside these condition, the other 3 remove conditions are here. The rest of the 
 
    If your autoremove-torrents and your bittorrent client are running on different machines, you need to use ``remote_free_space`` to check the free spaces. Besides, ``free_space`` and ``remote_free_space`` are the same.
 
-   Please note that not all of the clients support checking the specified path. Currently, only Deluge and Transmission support, and the parameter ``path`` in ``remote_free_space`` will be ignored in qBittorrent.
+   Please note that not all of the clients support checking the specified path. Currently, only Deluge, Transmission and rTorrent support, and the parameter ``path`` in ``remote_free_space`` will be ignored in qBittorrent. rTorrent can only measure ``path`` if an open torrent is stored there.
 
 Here is an example. For torrents whose categories are xxx or yyy, it removes the torrents which ratio is greater than 1 or seeding time is more than 1209600 seconds:
 

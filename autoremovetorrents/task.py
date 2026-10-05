@@ -7,6 +7,8 @@ from .client.qbittorrent import qBittorrent
 from .client.transmission import Transmission
 from .client.utorrent import uTorrent
 from .client.deluge import Deluge
+from .client.rtorrent import rTorrent
+from .exception.invalidconfiguration import InvalidConfiguration
 from .exception.nosuchclient import NoSuchClient
 from .strategy import Strategy
 from autoremovetorrents.torrent import Torrent
@@ -37,6 +39,7 @@ class Task(object):
         self._enabled_remove = remove_torrents
         self._delete_data = conf['delete_data'] if 'delete_data' in conf else False
         self._strategies = conf['strategies'] if 'strategies' in conf else []
+        self._client_options = conf.get('client_options') or {}
 
         # Torrents
         self._torrents = set()
@@ -73,13 +76,17 @@ class Task(object):
             u'μtorrent': uTorrent,
             u'utorrent': uTorrent, # Alias for μTorrent
             u'deluge': Deluge,
+            u'rtorrent': rTorrent,
         }
         self._client_name = self._client_name.lower() # Set the client name to be case insensitive
         if self._client_name not in clients:
             raise NoSuchClient("The client `%s` doesn't exist." % self._client_name)
 
         # Initialize client object
-        self._client = clients[self._client_name](self._host)
+        try:
+            self._client = clients[self._client_name](self._host, **self._client_options)
+        except TypeError as e:
+            raise InvalidConfiguration("Invalid client_options for the client `%s`: %s" % (self._client_name, e))
 
         # Login
         self._logger.info('Logging in...')
@@ -121,12 +128,16 @@ class Task(object):
         # Run deletion
         success, failed = self._client.remove_torrents([hash_ for hash_ in delete_list], self._delete_data)
         # Output logs
+        # Some clients (e.g. rTorrent with ruTorrent) delete the data later in the background
+        deferred = getattr(self._client, 'deferred_data_deletion', False)
         for hash_ in success:
-            self._logger.info(
-                'The torrent %s and its data have been removed.' if self._delete_data \
-                else 'The torrent %s has been removed.',
-                delete_list[hash_]
-            )
+            if self._delete_data and deferred:
+                message = 'The torrent %s has been removed and its data has been queued for deletion.'
+            elif self._delete_data:
+                message = 'The torrent %s and its data have been removed.'
+            else:
+                message = 'The torrent %s has been removed.'
+            self._logger.info(message, delete_list[hash_])
         for torrent in failed:
             self._logger.error('The torrent %s and its data cannot be removed. Reason: %s' if self._delete_data \
                 else 'The torrent %s cannot be removed. Reason: %s',

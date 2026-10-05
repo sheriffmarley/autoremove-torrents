@@ -27,7 +27,7 @@ setup(name = 'autoremove-torrents',
     zip_safe = True,
     install_requires = [
         'deluge-client',
-        'enum34',
+        'enum34; python_version < "3.4"',
         'ply',
         '' if SUPPORT_SHUTIL else 'psutil',
         PYYAML_VERSION,

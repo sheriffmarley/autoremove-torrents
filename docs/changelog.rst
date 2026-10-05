@@ -3,6 +3,19 @@
 ChangeLog
 ==========
 
+Unreleased
+-----------
+
+* Support rTorrent (via XML-RPC over HTTP(S), ruTorrent's ``httprpc`` plugin, or a local SCGI socket).
+    - Data can be deleted by ruTorrent's ``erasedata`` plugin (ruTorrent 5.3.9+) or locally. Both modes are restricted to the configured ``allowed_paths``.
+    - New task option ``client_options`` for client-specific settings.
+
+* Fix the CI workflow.
+    - Update the deprecated GitHub actions (``upload-artifact``/``download-artifact`` v2 are rejected by GitHub).
+    - Replace the qBittorrent 3.3.3 image, which can't be pulled by Docker any more.
+    - Test with Python 3.8 - 3.14 on Ubuntu 24.04.
+    - Add integration tests with rTorrent and ruTorrent, using fake torrents of random data.
+
 Version 1.5.5
 --------------
 

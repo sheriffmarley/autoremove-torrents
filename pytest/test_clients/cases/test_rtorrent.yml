@@ -1,0 +1,42 @@
+task:
+  client: rtorrent
+  host: $(RTORRENT_HOST)
+  username: $(RTORRENT_USERNAME)
+  password: $(RTORRENT_PASSWORD)
+  # This strategy checks whether all the filters and conditions supported by rTorrent work correctly.
+  # rTorrent doesn't provide: last_activity, downloading_time, max_average_downloadspeed, min_average_uploadspeed.
+  strategies:
+    strategy1:
+      excluded_trackers: tracker2
+      status:
+        - Downloading
+        - Uploading
+        - Checking
+        - Paused
+        - Stopped
+        - Error
+        - StalledUpload
+        - StalledDownload
+      create_time: 100000000
+      free_space:
+        path: .
+        min: 100000000
+        action: remove-old-seeds
+      max_connected_seeder: 100000000
+      max_downloadspeed: 100000000
+      max_progress: 100000000
+      max_seeder: 100000000
+      maximum_number:
+        limit: 100000000
+        action: remove-big-seeds
+      min_connected_leecher: -1
+      min_leecher: -1
+      min_uploadspeed: -1
+      ratio: 100000000
+      remove: ratio > 100000000
+      seed_size:
+        limit: 100000000
+        action: remove-active-seeds
+      seeding_time: 100000000
+      size: 100000000
+      upload_ratio: 100000000

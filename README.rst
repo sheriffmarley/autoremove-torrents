@@ -4,7 +4,7 @@ Auto Remove Torrents
 
 This program can help you to remove your torrents. Now you don't need to worry about your disk space - according to your strategies, the program will check each torrent if it satisfies the remove condition; If so, delete it automatically.
 
-This program supports qBittorrent/Transmission/μTorrent. If you like, star it :star2: :)
+This program supports qBittorrent/Transmission/μTorrent/Deluge/rTorrent. If you like, star it :star2: :)
 
 Documentation: https://autoremove-torrents.readthedocs.io/en/latest/
 

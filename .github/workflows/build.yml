@@ -27,10 +27,17 @@ env:
   UTORRENT_HOST: http://localhost:28080
   UTORRENT_USERNAME: admin
   UTORRENT_PASSWORD:
+  RTORRENT_HOST: http://localhost:38000/RPC2
+  RTORRENT_HTTPRPC_HOST: http://localhost:38080/plugins/httprpc/action.php
+  RTORRENT_SCGI_HOST: scgi:///tmp/rtorrent/run/scgi.socket
+  RTORRENT_USERNAME: admin
+  RTORRENT_PASSWORD: adminadmin
+  RUTORRENT_HOST: http://localhost:38080
+  RTORRENT_DOWNLOADS: /tmp/rtorrent/downloads
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       qbittorrent-latest:
         image: lscr.io/linuxserver/qbittorrent:latest
@@ -46,7 +53,9 @@ jobs:
           - 20000:6881
           - 20000:6881/udp
       qbittorrent-3:
-        image: wernight/qbittorrent:3.3.3
+        # 3.3.3 can't be pulled any more (Docker image manifest v1); 3.3.7 needs root to write /config
+        image: wernight/qbittorrent:3.3.7
+        options: --user root
         env:
           PUID: 1001
           PGID: 1001
@@ -116,34 +125,48 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [
-          "3.7",
           "3.8",
           "3.9",
           "3.10",
           "3.11",
-          "3.12"
+          "3.12",
+          "3.13",
+          "3.14"
         ]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
-        python -m pip install --upgrade pytest
-        python -m pip install --upgrade setuptools
         python -m pip install -r dev-requirements.txt
-        python setup.py install
+        python -m pip install .
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Start rTorrent and ruTorrent
+      run: |
+        mkdir -p /tmp/rtorrent/data /tmp/rtorrent/downloads /tmp/rtorrent/passwd /tmp/rtorrent/run
+        # Basic auth of XML-RPC and ruTorrent
+        echo "$RTORRENT_USERNAME:$(openssl passwd -apr1 "$RTORRENT_PASSWORD")" > /tmp/rtorrent/passwd/rpc.htpasswd
+        cp /tmp/rtorrent/passwd/rpc.htpasswd /tmp/rtorrent/passwd/rutorrent.htpasswd
+        # Same user as the runner, so that both sides can delete the test data
+        docker run -d --name rtorrent \
+          -p 38000:8000 -p 38080:8080 \
+          -e PUID="$(id -u)" -e PGID="$(id -g)" \
+          -v /tmp/rtorrent/data:/data \
+          -v /tmp/rtorrent/downloads:/downloads \
+          -v /tmp/rtorrent/passwd:/passwd \
+          -v /tmp/rtorrent/run:/var/run/rtorrent \
+          crazymax/rtorrent-rutorrent:5.3.14-0.16.22
     - name: Allow remote access of Deluge Daemon
       run: |
         docker stop ${{ job.services.deluge-latest.id }}
@@ -164,25 +187,54 @@ jobs:
     - name: Sleep for a while
       run: |
         sleep $((10 + $RANDOM % 50))
+    - name: Wait for rTorrent
+      run: |
+        for _ in $(seq 1 60); do
+          if curl -sf -u "$RTORRENT_USERNAME:$RTORRENT_PASSWORD" -H 'Content-Type: text/xml' \
+            --data '<?xml version="1.0"?><methodCall><methodName>system.client_version</methodName></methodCall>' \
+            "$RTORRENT_HOST" > /dev/null; then
+            exit 0
+          fi
+          sleep 2
+        done
+        docker logs rtorrent
+        exit 1
+    - name: Wait for the SCGI socket of rTorrent
+      run: |
+        for _ in $(seq 1 30); do
+          test -S /tmp/rtorrent/run/scgi.socket && exit 0
+          sleep 2
+        done
+        ls -la /tmp/rtorrent/run
+        exit 1
     - name: Test with pytest
       run: |
-        py.test -s --cov-report=xml --cov --log-level=INFO
+        pytest -s --cov-report=xml --cov --log-level=INFO
+    - name: Show logs of rTorrent
+      if: failure()
+      run: |
+        docker logs rtorrent
+        cat /tmp/rtorrent/data/rutorrent/rutorrent.log || true
     - name: Save coverage report
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
-        name: coverage.xml
+        name: coverage-${{ matrix.python-version }}
         path: coverage.xml
   codacy-coverage-reporter:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: codacy-coverage-reporter
     needs: build
+    env:
+      CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Load coverage report
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          name: coverage.xml
+          name: coverage-3.12
       - name: Run codacy-coverage-reporter
+        # Forks don't have the token
+        if: env.CODACY_PROJECT_TOKEN != ''
         uses: codacy/codacy-coverage-reporter-action@v1
         with:
           project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}

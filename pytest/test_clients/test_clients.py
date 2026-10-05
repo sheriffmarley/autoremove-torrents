@@ -4,6 +4,7 @@ import yaml
 from autoremovetorrents import logger
 from autoremovetorrents.task import Task
 from autoremovetorrents.exception.connectionfailure import ConnectionFailure
+from autoremovetorrents.exception.invalidconfiguration import InvalidConfiguration
 from autoremovetorrents.exception.loginfailure import LoginFailure
 from autoremovetorrents.exception.nosuchclient import NoSuchClient
 from autoremovetorrents.exception.nosuchtorrent import NoSuchTorrent
@@ -18,6 +19,7 @@ def test_client(env_dist):
     # Mapping of exceptions
     exception_map = {
         ConnectionFailure: 'ConnectionFailure',
+        InvalidConfiguration: 'InvalidConfiguration',
         LoginFailure: 'LoginFailure',
         NoSuchClient: 'NoSuchClient',
         NoSuchTorrent: 'NoSuchTorrent',

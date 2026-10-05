@@ -1,0 +1,12 @@
+task:
+  client: rtorrent
+  host: $(RTORRENT_HOST)
+  username: $(RTORRENT_USERNAME)
+  password: $(RTORRENT_PASSWORD)
+  delete_data: true
+  client_options:
+    delete_mode: local
+    allowed_paths:
+      - /
+exceptions:
+  - InvalidConfiguration
